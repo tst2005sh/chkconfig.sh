@@ -16,21 +16,10 @@ errorexit() {
 	echo >&2 "$1" ; exit ${2:-1};
 }
 
-die() { printf "$1"; exit 1; }
-lc() { printf %s "$1" | tr 'A-Z' 'a-z'; }
+# die() { printf "$1"; exit 1; }
+# lc() { printf %s "$1" | tr 'A-Z' 'a-z'; }
 Return() { printf %s\\n "$1"; }
-printf_STDERR() { printf >&2 "$@"; }
-
-rootdir='/'
-
-usecolor=true
-[ -t 1 ] || usecolor=false
-
-force=""
-
-initdir='etc/init.d'
-inetddir='etc/inetd.d' ;# not used yet
-xinetddir='etc/xinetd.d' ;# not used yet
+# printf_STDERR() { printf >&2 "$@"; }
 
 to_d() {
 	case "$1" in
@@ -99,7 +88,7 @@ __list_target() {
 	printf "%-24s" "$target"
 	for l in "$@"; do
 		local sd="$(to_d $l)"
-		local d="/etc/$sd"
+		local d="${rootdir:-/}etc/$sd"
 		[ ! -d "$d" ] && continue
 		if $usecolor; then
 			if __list_target_rcN "$d" "$target" "$l"; then
@@ -139,8 +128,8 @@ __list_all() {
 
 __listinitdname() {
 	{
-		find /etc/init.d/ -type f -print
-		find /etc/init.d/ -type l -print
+		find "${rootdir:-/}etc/init.d/" -type f -print
+		find "${rootdir:-/}etc/init.d/" -type l -print
 	} | sort -u \
 	| while read -r d_f; do
 		basename "$d_f"
@@ -176,6 +165,24 @@ needhelp() {
 }
 needhelp "$@"
 
+
+rootdir='/'
+
+usecolor=true
+[ -t 1 ] || usecolor=false
+
+force=""
+
+initdir='etc/init.d'
+# inetddir='etc/inetd.d' ;# not used yet
+# xinetddir='etc/xinetd.d' ;# not used yet
+
+setrootdir() {
+	rootdir="${1%/}"
+	rootdir="${rootdir}/"
+}
+
+
 SHOWDEPS=false
 ALLSERVICES=false
 DO_LIST=false
@@ -191,26 +198,28 @@ else
 				force=-f
 			;;
 			--root)
-				rootdir="$1";shift
+				shift; setrootdir "$1"
 			;;
 			--root=*)
-				rootdir="${1#*=}";shift
+				setrootdir "${1#*=}"
 			;;
 			-A|--allservices)
 				if [ "${DO_LIST:-false}" = "false" ]; then
-					NOACTION=false; ALLSERVICES=true
+					NOACTION=false
+					ALLSERVICES=true
 				fi
 			;;
 			-l|--list)
 				ALLSERVICES=false
-				NOACTION=false; DO_LIST=true
+				NOACTION=false
+				DO_LIST=true
 			;;
 			--deps)
 				SHOWDEPS=true ;# only used with --list, is not a action.
 			;;
 			-*)
 				echo >&2 "Unknown option $1"
-				usage
+				#usage
 				exit 1
 			;;
 			*) break
