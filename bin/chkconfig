@@ -8,7 +8,17 @@
 # TOSEE: apt-cache show sysv-rc-conf
 
 # TODO:
-# - coder la partie list : inetd et xinetd
+# - coder la partie list : inetd et xinetd (xinetd.conf)
+
+# Warning: the xinetd info only read inside xinetd.d/*, not inside the xinetd.conf
+
+# in original chkconfig(.pl) there are some ignored services :
+#+halt______________________0:off__1:off__2:off__3:off__4:off__5:off
+#+rc________________________0:off__1:off__2:off__3:off__4:off__5:off
+#+reboot____________________0:off__1:off__2:off__3:off__4:off__5:off
+#+single____________________0:off__1:on___2:off__3:off__4:off__5:off
+#+skeleton__________________0:off__1:off__2:off__3:off__4:off__5:off
+
 
 set -e
 
@@ -76,6 +86,17 @@ _chkconfig__known_rc() {
 	return 1
 }
 
+_chkconfig_color() {
+	local target="${1:-green}";shift
+	local fmt
+	if $usecolor; then
+		case "$target" in
+			green) fmt='\033[32;01m%s\033[0m' ;;
+		esac
+	fi
+	printf "${fmt:-%s}" "$1"
+}
+
 _chkconfig__list_target() {
 	local target="$1"; shift
 
@@ -83,28 +104,18 @@ _chkconfig__list_target() {
 		echo >&2 "$target: unknown service"
 		return 1
 	fi
-
 	printf "%-24s" "$target"
 	for l in "$@"; do
-		local sd
+		local d
 		case "$l" in
-			[0-9]|S) sd="rc${l}.d" ;;
-			B) sd="boot.d" ;;
+			[0-9]|S) d="${rootdir:-/}etc/rc${l}.d" ;;
+			B)       d="${rootdir:-/}etc/boot.d" ;;
 		esac
-		local d="${rootdir:-/}etc/$sd"
 		[ ! -d "$d" ] && continue
-		if $usecolor; then
-			if _chkconfig__list_target_rcN "$d" "$target"; then
-				printf '\033[32;01m%s\033[0m' "  $l:on "
-			elif [ "$l" != "S" ]; then
-				printf %s "  $l:off"
-			fi
-		else
-			if _chkconfig__list_target_rcN "$d" "$target" "$l"; then
-				printf %s "  $l:on "
-			elif [ "$l" != "S" ]; then
-				printf %s "  $l:off"
-			fi
+		if _chkconfig__list_target_rcN "$d" "$target"; then
+			_chkconfig_color green "  $l:on "
+		elif [ "$l" != "S" ]; then
+			_chkconfig_color none "  $l:off"
 		fi
 	done
 	#if ${printdeps}; then
@@ -131,6 +142,24 @@ _chkconfig__listinitdname() {
 		basename "$d_f"
 	done
 }
+
+_chkconfig__list_xinetd() {
+	echo 'xinetd based services:'
+	(
+		cd "${rootdir:-/}etc/xinetd.d/" && \
+		grep -r 'disable.*=.*\(yes\|no\)' . | tr -d ' \t' | sort -u | (
+			IFS=:
+			while read -r p s; do
+				case "$s" in
+					disable=yes)	printf '%8s%-19s %s\n' "" "${p#./}:" "off" ;;
+					disable=no)	printf '%8s%-19s %s\n' "" "${p#./}:" "$(_chkconfig_color green "on")"  ;;
+					*) error
+				esac
+			done
+		)
+	)
+}
+
 _chkconfig__check_for_change() {
 	UPDATERC="$(command -v update-rc.d)" || {
 		echo >&2 "No such update-rc.d"
@@ -248,6 +277,7 @@ chkconfig() {
 		if [ $# -eq 0 ]; then
 			# with ou without SHOWDEPS
 			_chkconfig__list_targets $(_chkconfig__listinitdname)
+			_chkconfig__list_xinetd
 			exit $?
 		else
 			# with ou without SHOWDEPS
