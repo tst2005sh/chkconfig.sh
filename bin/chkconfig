@@ -12,13 +12,7 @@
 
 # Warning: the xinetd info only read inside xinetd.d/*, not inside the xinetd.conf
 
-# in original chkconfig(.pl) there are some ignored services :
-#+halt______________________0:off__1:off__2:off__3:off__4:off__5:off
-#+rc________________________0:off__1:off__2:off__3:off__4:off__5:off
-#+reboot____________________0:off__1:off__2:off__3:off__4:off__5:off
-#+single____________________0:off__1:on___2:off__3:off__4:off__5:off
-#+skeleton__________________0:off__1:off__2:off__3:off__4:off__5:off
-
+# in original chkconfig(.pl) some services are ignored : halt rc reboot single skeleton
 
 set -e
 
@@ -139,6 +133,9 @@ _chkconfig__listinitdname() {
 	find "${rootdir:-/}etc/init.d/" \( -type f -o -type l \) -a -print \
 	| sort -u \
 	| while read -r d_f; do
+		case "$d_f" in
+			*/halt|*/rc|*/reboot|*/single|*/skeleton) continue ;;
+		esac
 		basename "$d_f"
 	done
 }
@@ -147,13 +144,14 @@ _chkconfig__list_xinetd() {
 	[ -d "${rootdir:-/}etc/xinetd.d/" ] || return
 	echo 'xinetd based services:'
 	(
-		grep -r 'disable.*=.*\(yes\|no\)' . | tr -d ' \t' | sort -u | (
+		cd "${rootdir:-/}etc/xinetd.d/" && \
+		grep -rH 'disable.*=.*\(yes\|no\)' . | tr -d ' \t' | sort -u | (
 			IFS=:
 			while read -r p s; do
 				case "$s" in
 					disable=yes)	printf '%8s%-19s %s\n' "" "${p#./}:" "off" ;;
 					disable=no)	printf '%8s%-19s %s\n' "" "${p#./}:" "$(_chkconfig_color green "on")"  ;;
-					*) error
+					*) echo "Error: unknown case for xinetd: $s"
 				esac
 			done
 		)
