@@ -248,7 +248,7 @@ service_on() {
 service_off() {
 	local UPDATERC
 	check_for_change
-	"$UPDATERC" $(force:+-f} "$1" disable >/dev/null 2>&1 || echo "Fail to disable '$1'."
+	"$UPDATERC" ${force:+-f} "$1" disable >/dev/null 2>&1 || echo "Fail to disable '$1'."
 }
 
 if $NOACTION; then
