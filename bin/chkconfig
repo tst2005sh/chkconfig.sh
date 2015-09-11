@@ -12,30 +12,28 @@
 
 set -e
 
-errorexit() {
-	echo >&2 "$1" ; exit ${2:-1};
+_chkconfig__usage() {
+	echo 'Usage:'
+	echo '        chkconfig -A|--allservices              (together with -l: show all services)'
+#	echo '        chkconfig -t|--terse [names]            (shows the links)'
+#	echo '        chkconfig -e|--edit  [names]            (configure services)'
+#	echo '        chkconfig -s|--set   [name state]...    (configure services)'
+	echo '        chkconfig -l|--list [--deps] [names]    (shows the links)'
+#	echo '        chkconfig -c|--check name [state]       (check state)'
+#	echo '        chkconfig -a|--add   [names]            (runs insserv)'
+#	echo '        chkconfig -d|--del   [names]            (runs insserv -r)'
+	echo '        chkconfig -h|--help                     (print usage)'
+	echo '        chkconfig -f|--force ...                (call insserv with -f)'
+	echo ''
+#	echo '        chkconfig [name]             same as chkconfig -t'
+	echo '        chkconfig name state...      same as chkconfig -s name state'
+	echo '        chkconfig --root=<root> ...  use <root> as the root file system'
+	echo '        chkconfig --color=<WHEN>     colorize the output.'
+	echo '                                     <WHEN> defaults to "auto" or can be "never" or "always".'
 }
 
-# die() { printf "$1"; exit 1; }
-# lc() { printf %s "$1" | tr 'A-Z' 'a-z'; }
-Return() { printf %s\\n "$1"; }
-# printf_STDERR() { printf >&2 "$@"; }
 
-to_d() {
-	case "$1" in
-	'0') Return 'rc0.d' ;;
-	'1') Return 'rc1.d' ;;
-	'2') Return 'rc2.d' ;;
-	'3') Return 'rc3.d' ;;
-	'4') Return 'rc4.d' ;;
-	'5') Return 'rc5.d' ;;
-	'6') Return 'rc6.d' ;;
-	'S') Return 'rcS.d' ;;
-	'B') Return 'boot.d' ;;
-	esac
-}
-
-__list_target_rcN() {
+_chkconfig__list_target_rcN() {
 	local d="$1";shift
 	local t="$1";shift
 	if [ -d "$d" ]; then
@@ -62,11 +60,14 @@ __list_target_rcN() {
 	return 1
 }
 
-__known_rc() {
+_chkconfig__known_rc() {
 	local target="$1"; shift
 	for l in 0 1 2 3 4 5 6 B S; do
-		local sd="$(to_d $l)"
-		local d="${rootdir:-/}etc/$sd"
+		local d
+		case "$l" in
+			[0-9]|S)  d="${rootdir:-/}etc/rc${l}.d" ;;
+			B)        d="${rootdir:-/}etc/boot.d"   ;;
+		esac
 		[ ! -d "$d" ] && continue
 		if [ -f "${rootdir:-/}${initdir:-etc/init.d}/$target" ] || find "$d" -type l -name '[KS][0-9][0-9]'"$target" |grep -q ''; then
 			return 0
@@ -75,29 +76,31 @@ __known_rc() {
 	return 1
 }
 
-__list_target() {
-
+_chkconfig__list_target() {
 	local target="$1"; shift
 
-	if ! __known_rc "$target"; then
+	if ! _chkconfig__known_rc "$target"; then
 		echo >&2 "$target: unknown service"
-		# unless $known_all{$s};
 		return 1
 	fi
 
 	printf "%-24s" "$target"
 	for l in "$@"; do
-		local sd="$(to_d $l)"
+		local sd
+		case "$l" in
+			[0-9]|S) sd="rc${l}.d" ;;
+			B) sd="boot.d" ;;
+		esac
 		local d="${rootdir:-/}etc/$sd"
 		[ ! -d "$d" ] && continue
 		if $usecolor; then
-			if __list_target_rcN "$d" "$target" "$l"; then
+			if _chkconfig__list_target_rcN "$d" "$target"; then
 				printf '\033[32;01m%s\033[0m' "  $l:on "
 			elif [ "$l" != "S" ]; then
 				printf %s "  $l:off"
 			fi
 		else
-			if __list_target_rcN "$d" "$target" "$l"; then
+			if _chkconfig__list_target_rcN "$d" "$target" "$l"; then
 				printf %s "  $l:on "
 			elif [ "$l" != "S" ]; then
 				printf %s "  $l:off"
@@ -110,170 +113,176 @@ __list_target() {
 	printf '\n'
 }
 
-__list_targets() {
-
+_chkconfig__list_targets() {
 	for target in "$@"; do
 		case "$target" in
 			README) continue ;;
 			.*) continue ;;
 		esac
 
-		__list_target "$target" 0 1 2 3 4 5 B S || true
+		_chkconfig__list_target "$target" 0 1 2 3 4 5 B S || true
 	done
 }
 
-__list_all() {
-	__list_targets $(__listinitdname)
-}
-
-__listinitdname() {
-	{
-		find "${rootdir:-/}etc/init.d/" -type f -print
-		find "${rootdir:-/}etc/init.d/" -type l -print
-	} | sort -u \
+_chkconfig__listinitdname() {
+	find "${rootdir:-/}etc/init.d/" \( -type f -o -type l \) -a -print \
+	| sort -u \
 	| while read -r d_f; do
 		basename "$d_f"
 	done
 }
-
-usage() {
-	echo 'usage:'
-	echo '        chkconfig -A|--allservices              (together with -l: show all services)'
-#	echo '        chkconfig -t|--terse [names]            (shows the links)'
-#	echo '        chkconfig -e|--edit  [names]            (configure services)'
-#	echo '        chkconfig -s|--set   [name state]...    (configure services)'
-	echo '        chkconfig -l|--list [--deps] [names]    (shows the links)'
-#	echo '        chkconfig -c|--check name [state]       (check state)'
-#	echo '        chkconfig -a|--add   [names]            (runs insserv)'
-#	echo '        chkconfig -d|--del   [names]            (runs insserv -r)'
-	echo '        chkconfig -h|--help                     (print usage)'
-	echo '        chkconfig -f|--force ...                (call insserv with -f)'
-	echo ''
-#	echo '        chkconfig [name]             same as chkconfig -t'
-	echo '        chkconfig name state...      same as chkconfig -s name state'
-	echo '        chkconfig --root=<root> ...  use <root> as the root file system'
+_chkconfig__check_for_change() {
+	UPDATERC="$(command -v update-rc.d)" || {
+		echo >&2 "No such update-rc.d"
+		exit 1
+	}
+	local INSSERV="$(command -v insserv)" || {
+		echo >&2 "No such inssert"
+		exit 1
+	}
 }
 
-needhelp() {
+_chkconfig__needhelp() {
 	while [ $# -gt 0 ]; do
 		case "$1" in
-			-h|--help) usage; exit 0 ;;
+			-h|--help) _chkconfig__usage; exit 0 ;;
 			--) break ;;
 		esac
 		shift
 	done
 }
-needhelp "$@"
+_chkconfig__needhelp "$@"
 
+chkconfig() {
+	local rootdir='/'
 
-rootdir='/'
+	local color="auto"
+	local usecolor=true
+	[ -t 1 ] || usecolor=false
 
-usecolor=true
-[ -t 1 ] || usecolor=false
+	local force=""
 
-force=""
+	local initdir='etc/init.d'
+	# local inetddir='etc/inetd.d' ;# not used yet
+	# local xinetddir='etc/xinetd.d' ;# not used yet
 
-initdir='etc/init.d'
-# inetddir='etc/inetd.d' ;# not used yet
-# xinetddir='etc/xinetd.d' ;# not used yet
+	local SHOWDEPS=false
+	local ALLSERVICES=false
+	local DO_LIST=false
+	local NOACTION=true
 
-setrootdir() {
-	rootdir="${1%/}"
-	rootdir="${rootdir}/"
-}
-
-
-SHOWDEPS=false
-ALLSERVICES=false
-DO_LIST=false
-NOACTION=true
-
-if [ $# -eq 0 ]; then
-	ALLSERVICES=true ;# default action is --allservices
-else
-
-	while [ $# -gt 0 ]; do
-		case "$1" in
-			-f|--force)
-				force=-f
-			;;
-			--root)
-				shift; setrootdir "$1"
-			;;
-			--root=*)
-				setrootdir "${1#*=}"
-			;;
-			-A|--allservices)
-				if [ "${DO_LIST:-false}" = "false" ]; then
-					NOACTION=false
-					ALLSERVICES=true
-				fi
-			;;
-			-l|--list)
-				ALLSERVICES=false
-				NOACTION=false
-				DO_LIST=true
-			;;
-			--deps)
-				SHOWDEPS=true ;# only used with --list, is not a action.
-			;;
-			-*)
-				echo >&2 "Unknown option $1"
-				#usage
-				exit 1
-			;;
-			*) break
-		esac
-		shift
-	done
-
-	if [ "${NOACTION}" = "true" ]; then
-		ALLSERVICES=true
-	fi
-fi
-
-if $DO_LIST; then
 	if [ $# -eq 0 ]; then
-		# with ou without SHOWDEPS
-		__list_all; exit $?
+		ALLSERVICES=true ;# default action is --allservices
 	else
-		# with ou without SHOWDEPS
-		__list_targets "$@"; exit $?
+
+		while [ $# -gt 0 ]; do
+			case "$1" in
+				-f|--force)
+					force=-f
+				;;
+				--root)
+					shift;
+					rootdir="${1%/}"
+					case "$rootdir" in
+						*/) ;;
+						*) rootdir="${rootdir}/"
+					esac
+				;;
+				--root=*)
+					rootdir="${1#*=}"
+					case "$rootdir" in
+						*/) ;;
+						*) rootdir="${rootdir}/"
+					esac
+				;;
+				--color|--color=*)
+					if [ "$1" = "--color" ]; then
+						shift
+						color="$1"
+					else
+						color="${1#*=}"
+					fi
+					case "$color" in
+						auto)
+							[ -t 1 ] && usecolor=true || usecolor=false
+						;;
+						never)
+							usecolor=false
+						;;
+						always)
+							usecolor=true
+						;;
+						*) echo >&2 "Invalid color option value"; exit 1
+					esac
+				;;
+				-A|--allservices)
+					if [ "${DO_LIST:-false}" = "false" ]; then
+						NOACTION=false
+						ALLSERVICES=true
+					fi
+				;;
+				-l|--list)
+					ALLSERVICES=false
+					NOACTION=false
+					DO_LIST=true
+				;;
+				--deps)
+					SHOWDEPS=true ;# only used with --list, is not a action.
+				;;
+				-*)
+					echo >&2 "Unknown option $1"
+					#_chkconfig__usage
+					exit 1
+				;;
+				*) break
+			esac
+			shift
+		done
+
+		if [ "${NOACTION}" = "true" ]; then
+			ALLSERVICES=true
+		fi
 	fi
-fi
 
+	if $DO_LIST; then
+		if [ $# -eq 0 ]; then
+			# with ou without SHOWDEPS
+			_chkconfig__list_targets $(_chkconfig__listinitdname)
+			exit $?
+		else
+			# with ou without SHOWDEPS
+			_chkconfig__list_targets "$@"; exit $?
+		fi
+	fi
 
+	if $NOACTION; then
+		while [ $# -gt 0 ]; do
+			case "$2" in
+				[0-9]*) shift 2 ; continue ;;
+				on)
+					local UPDATERC
+					_chkconfig__check_for_change
+					"$UPDATERC" ${force:+-f} "$1" enable >/dev/null 2>&1 || echo "Fail to enable '$1'."
+					shift 2
+					continue
+				;;
+				off)
+					local UPDATERC
+					_chkconfig__check_for_change
+					"$UPDATERC" ${force:+-f} "$1" disable >/dev/null 2>&1 || echo "Fail to disable '$1'."
+					shift 2
+					continue
+				;;
+				*) _chkconfig__list_targets "$1"
+			esac
+			shift
+		done
+	fi
 
-check_for_change() {
-	UPDATERC="$(command -v update-rc.d)" || errorexit "No such update-rc.d"
-	local INSSERV="$(command -v insserv)" || errorexit "No such inssert"
+	if $ALLSERVICES; then
+		#echo "all services not implemented yet"
+		_chkconfig__list_targets $(_chkconfig__listinitdname)
+	fi
 }
-
-service_on() {
-	local UPDATERC
-	check_for_change
-	"$UPDATERC" ${force:+-f} "$1" enable >/dev/null 2>&1 || echo "Fail to enable '$1'."
-}
-service_off() {
-	local UPDATERC
-	check_for_change
-	"$UPDATERC" ${force:+-f} "$1" disable >/dev/null 2>&1 || echo "Fail to disable '$1'."
-}
-
-if $NOACTION; then
-	while [ $# -gt 0 ]; do
-		case "$2" in
-			[0-9]*) shift 2 ; continue ;;
-			on)	service_on  "$1" ; shift 2 ; continue ;;
-			off)	service_off "$1" ; shift 2 ; continue ;;
-			*) __list_targets "$1"
-		esac
-		shift
-	done
-fi
-	
-
-#__listtarget ssh 0 1 2 3 4 5 6 S B
-#__listall
-exit 123
-
+chkconfig "$@"
+exit $?
