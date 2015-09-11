@@ -144,9 +144,9 @@ _chkconfig__listinitdname() {
 }
 
 _chkconfig__list_xinetd() {
+	[ -d "${rootdir:-/}etc/xinetd.d/" ] || return
 	echo 'xinetd based services:'
 	(
-		cd "${rootdir:-/}etc/xinetd.d/" && \
 		grep -r 'disable.*=.*\(yes\|no\)' . | tr -d ' \t' | sort -u | (
 			IFS=:
 			while read -r p s; do
