@@ -91,11 +91,11 @@ _chkconfig_color() {
 	printf "${fmt:-%s}" "$1"
 }
 
-_chkconfig__list_target() {
+_chkconfig__list_target_sysv() {
 	local target="$1"; shift
 
 	if ! _chkconfig__known_rc "$target"; then
-		echo >&2 "$target: unknown service"
+		echo >&2 "(sysv): $target: unknown service"
 		return 1
 	fi
 	printf "%-24s" "$target"
@@ -118,16 +118,110 @@ _chkconfig__list_target() {
 	printf '\n'
 }
 
-_chkconfig__list_targets() {
+_chkconfig__list_target_systemd() {
+	local target="$1"; shift
+	local targetlong="$1"; shift
+	local state="$1"; shift
+	if [ -z "$state" ]; then
+		#echo >&2 "#debug: targetlong=$targetlong"
+		state="$(systemctl list-unit-files --no-legend --no-pager "$targetlong")"
+		state="${state#* }"
+	else
+		case "$state" in
+			('enabled'|'disabled') ;;
+			('masked'|'static') return ;;
+			('invalid') return ;;
+			(*) return
+		esac
+	fi
+
+	printf "%-24s" "$target"
+	for l in 0 1 2 3 4 5 B S; do
+		case "$l" in
+			("${runlevel:-2}")
+				case "$state" in
+					enabled)	_chkconfig_color green "  $l:on " ;;
+					disabled)	_chkconfig_color none "  $l:off" ;;
+					*)		_chkconfig_color none " $l:?  " ;;
+				esac
+				
+#				if systemdctl is-active "${target}.service" >/dev/null; then
+#					_chkconfig_color green "  $l:on "
+#				else
+#					_chkconfig_color none "  $l:off"
+#				fi
+			;;
+			B|S) continue ;;
+			(*)
+				_chkconfig_color none "  $l:?  "
+			;;
+		esac
+	done
+	printf '\n'
+}
+
+_chkconfig__list_targets_sysv() {
+	local target
 	for target in "$@"; do
 		case "$target" in
 			README) continue ;;
 			.*) continue ;;
 		esac
-
-		_chkconfig__list_target "$target" 0 1 2 3 4 5 B S || true
+		_chkconfig__list_target_sysv "$target" 0 1 2 3 4 5 B S || true
 	done
 }
+
+
+_chkconfig__list_targets_systemd() {
+	local runlevel="$(runlevel)"
+	case "$runlevel" in
+		('N '?) runlevel="${runlevel#N }" ;;
+		(*) runlevel="2"
+	esac
+
+#	local targets
+#	if [ $# -eq 0 ]; then
+#		targets="-a"
+#	else
+#		targets=""
+#		local short
+#		for short in "$@"; do
+#			targets="${targets:+ }${short%.service}.service"
+#		done
+#	fi
+	(
+	if [ $# -eq 0 ]; then
+		systemctl list-unit-files -t service --state=enabled,disabled --no-pager --no-legend
+	else
+		for short in "$@"; do
+			systemctl list-unit-files -t service --state=enabled,disabled --no-pager --no-legend ${short%.service}.service
+		done
+	fi
+	) \
+	| while read -r targetlong state _ign; do
+		local target="$targetlong"
+		case "$targetlong" in
+			(*'@.'*) continue ;;
+			(*'.service') target="${targetlong%.service}" ;;
+#			(*) continue ;;
+		esac
+		_chkconfig__list_target_systemd "$target" "$targetlong" "$state"
+	done
+}
+_chkconfig__list_targets() {
+	if [ $# -eq 0 ]; then
+		echo "# sysv:"
+		_chkconfig__list_targets_sysv $(_chkconfig__listinitdname)
+		echo "# systemd:"
+		_chkconfig__list_targets_systemd
+	else
+		echo "# sysv:"
+		_chkconfig__list_targets_sysv "$@"
+		echo "# systemd:"
+		_chkconfig__list_targets_systemd "$@"
+	fi
+}
+
 
 _chkconfig__listinitdname() {
 	find "${rootdir:-/}etc/init.d/" \( -type f -o -type l \) -a -print \
@@ -158,15 +252,64 @@ _chkconfig__list_xinetd() {
 	)
 }
 
+
+
+_chkconfig__service_enable() {
+	local UPDATERC SYSTEMCTL
+	_chkconfig__check_for_change
+
+	[ -z "$UPDATERC"  ] || _chkconfig__sysv_service_enable    "$1"
+	[ -z "$SYSTEMCTL" ] || _chkconfig__systemd_service_enable "$1"
+}
+_chkconfig__service_disable() {
+	local UPDATERC SYSTEMCTL
+	_chkconfig__check_for_change
+
+	[ -z "$UPDATERC"  ] || _chkconfig__sysv_service_disable    "$1"
+	[ -z "$SYSTEMCTL" ] || _chkconfig__systemd_service_disable "$1"
+}
+
+
+_chkconfig__sysv_service_enable() {
+	"$UPDATERC" ${force:+-f} "$1" enable >/dev/null 2>&1
+}
+
+_chkconfig__sysv_service_disable() {
+	"$UPDATERC" ${force:+-f} "$1" disable >/dev/null 2>&1
+}
+
+_chkconfig__systemd_service_enable() {
+	if ! "$SYSTEMCTL" -q is-enabled "${1%.service}.service" >/dev/null; then
+		"$SYSTEMCTL" enable "${1%.service}.service" >/dev/null 2>&1
+	else
+		echo "$1 Already enabled"
+	fi
+}
+
+_chkconfig__systemd_service_disable() {
+	if "$SYSTEMCTL" -q is-enabled "${1%.service}.service"; then
+		"$SYSTEMCTL" disable "${1%.service}.service" >/dev/null 2>&1
+	else
+		echo "$1 Already disabled"
+	fi
+}
+
+
 _chkconfig__check_for_change() {
-	UPDATERC="$(command -v update-rc.d)" || {
-		echo >&2 "No such update-rc.d"
-		exit 1
-	}
-	local INSSERV="$(command -v insserv)" || {
-		echo >&2 "No such inssert"
-		exit 1
-	}
+	UPDATERC="$(command -v update-rc.d)"
+	SYSTEMCTL="$(command -v systemctl)"
+
+#	local INSSERV
+#	INSSERV="$(command -v insserv)"
+
+	if [ -z "$UPDATERC" ] && [ -z "$SYSTEMCTL" ]; then
+		echo >&2 "No such update-rc.d or systemctl"
+		return 1
+	fi
+#	if [ -z "$INSSERV" ]; then
+#		echo >&2 "No such inssert"
+#		return 1
+#	fi
 }
 
 _chkconfig__needhelp() {
@@ -274,7 +417,7 @@ chkconfig() {
 	if $DO_LIST; then
 		if [ $# -eq 0 ]; then
 			# with ou without SHOWDEPS
-			_chkconfig__list_targets $(_chkconfig__listinitdname)
+			_chkconfig__list_targets
 			_chkconfig__list_xinetd
 			exit $?
 		else
@@ -288,16 +431,20 @@ chkconfig() {
 			case "$2" in
 				[0-9]*) shift 2 ; continue ;;
 				on)
-					local UPDATERC
-					_chkconfig__check_for_change
-					"$UPDATERC" ${force:+-f} "$1" enable >/dev/null 2>&1 || echo "Fail to enable '$1'."
+					if _chkconfig__service_enable "$1"; then
+						_chkconfig__list_targets "$1"
+					else
+						echo "Fail to enable '$1'."
+					fi
 					shift 2
 					continue
 				;;
 				off)
-					local UPDATERC
-					_chkconfig__check_for_change
-					"$UPDATERC" ${force:+-f} "$1" disable >/dev/null 2>&1 || echo "Fail to disable '$1'."
+					if _chkconfig__service_disable "$1"; then
+						_chkconfig__list_targets "$1"
+					else
+						echo "Fail to disable '$1'."
+					fi
 					shift 2
 					continue
 				;;
@@ -305,11 +452,12 @@ chkconfig() {
 			esac
 			shift
 		done
+		ALLSERVICES=false
 	fi
 
 	if $ALLSERVICES; then
 		#echo "all services not implemented yet"
-		_chkconfig__list_targets $(_chkconfig__listinitdname)
+		_chkconfig__list_targets
 	fi
 }
 chkconfig "$@"
