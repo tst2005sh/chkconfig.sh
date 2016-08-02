@@ -41,7 +41,7 @@ _chkconfig__list_target_rcN() {
 	local d="$1";shift
 	local t="$1";shift
 	if [ -d "$d" ]; then
-		find "$d" -type l -name '*'"$t" \
+		find "$d/" -type l -name '*'"$t" \
 		| (
 		while read dir_file; do
 			[ "$(dirname "$dir_file")" != "$d" ] && continue
@@ -165,6 +165,7 @@ _chkconfig__list_targets_sysv() {
 	for target in "$@"; do
 		case "$target" in
 			README) continue ;;
+			functions) continue ;;
 			.*) continue ;;
 		esac
 		_chkconfig__list_target_sysv "$target" 0 1 2 3 4 5 B S || true
