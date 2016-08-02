@@ -124,7 +124,7 @@ _chkconfig__list_target_systemd() {
 	local state="$1"; shift
 	if [ -z "$state" ]; then
 		#echo >&2 "#debug: targetlong=$targetlong"
-		state="$(systemctl list-unit-files --no-legend --no-pager "$targetlong")"
+		state="$("$SYSTEMCTL" list-unit-files --no-legend --no-pager "$targetlong")"
 		state="${state#* }"
 	else
 		case "$state" in
@@ -192,10 +192,10 @@ _chkconfig__list_targets_systemd() {
 #	fi
 	(
 	if [ $# -eq 0 ]; then
-		systemctl list-unit-files -t service --state=enabled,disabled --no-pager --no-legend
+		"$SYSTEMCTL" list-unit-files -t service --state=enabled,disabled --no-pager --no-legend
 	else
 		for short in "$@"; do
-			systemctl list-unit-files -t service --state=enabled,disabled --no-pager --no-legend ${short%.service}.service
+			"$SYSTEMCTL" list-unit-files -t service --state=enabled,disabled --no-pager --no-legend ${short%.service}.service
 		done
 	fi
 	) \
@@ -210,16 +210,22 @@ _chkconfig__list_targets_systemd() {
 	done
 }
 _chkconfig__list_targets() {
+	local SYSTEMCTL
+	SYSTEMCTL="$(command -v systemctl)" || true
 	if [ $# -eq 0 ]; then
 		echo "# sysv:"
 		_chkconfig__list_targets_sysv $(_chkconfig__listinitdname)
-		echo "# systemd:"
-		_chkconfig__list_targets_systemd
+		if [ -n "$SYSTEMCTL" ];then
+			echo "# systemd:"
+			_chkconfig__list_targets_systemd
+		fi
 	else
 		echo "# sysv:"
 		_chkconfig__list_targets_sysv "$@"
-		echo "# systemd:"
-		_chkconfig__list_targets_systemd "$@"
+		if [ -n "$SYSTEMCTL" ];then
+			echo "# systemd:"
+			_chkconfig__list_targets_systemd "$@"
+		fi
 	fi
 }
 
@@ -240,7 +246,7 @@ _chkconfig__list_xinetd() {
 	echo 'xinetd based services:'
 	(
 		cd "${rootdir:-/}etc/xinetd.d/" && \
-		grep -rH 'disable.*=.*\(yes\|no\)' . | tr -d ' \t' | sort -u | (
+		grep 2>&- -rH 'disable.*=.*\(yes\|no\)' . | tr -d ' \t' | sort -u | (
 			IFS=:
 			while read -r p s; do
 				case "$s" in
@@ -250,6 +256,13 @@ _chkconfig__list_xinetd() {
 				esac
 			done
 		)
+		# list service that is not readable (maybe a permission issue)
+		cd "${rootdir:-/}etc/xinetd.d/" && \
+		for p in *; do
+			if [ -f "$p" ] && [ ! -r "$p" ]; then
+				printf '%8s%-19s %s\n' "" "${p#./}:" "?  "
+			fi
+		done
 	)
 }
 
@@ -297,8 +310,8 @@ _chkconfig__systemd_service_disable() {
 
 
 _chkconfig__check_for_change() {
-	UPDATERC="$(command -v update-rc.d)"
-	SYSTEMCTL="$(command -v systemctl)"
+	UPDATERC="$(command -v update-rc.d)" || true
+	SYSTEMCTL="$(command -v systemctl)" || true
 
 #	local INSSERV
 #	INSSERV="$(command -v insserv)"
@@ -449,7 +462,11 @@ chkconfig() {
 					shift 2
 					continue
 				;;
-				*) _chkconfig__list_targets "$1"
+				*)
+					_chkconfig__list_targets "$1"
+					if [ "$1" = "xinetd" ]; then
+						_chkconfig__list_xinetd
+					fi
 			esac
 			shift
 		done
