@@ -285,7 +285,10 @@ _chkconfig__service_disable() {
 
 
 _chkconfig__sysv_service_enable() {
-	"$UPDATERC" ${force:+-f} "$1" enable >/dev/null 2>&1
+	if ! "$UPDATERC" ${force:+-f} "$1" enable >/dev/null 2>&1; then
+		"$UPDATERC" "$1" defaults
+		"$UPDATERC" ${force:+-f} "$1" enable >/dev/null 2>&1
+	fi
 }
 
 _chkconfig__sysv_service_disable() {
